@@ -1,0 +1,10 @@
+---
+k3s_checksums:
+  v1.20.4+k3s1:  1c7b68b0b7d54f21a9c1727545a7db181668115f161a3986bc137261dd817e98
+  v1.20.5+k3s1:  948a55045fe7c142f082c68bfba16ca13d0a381a103633a2357aa40558dabcde
+  v1.18.17+k3s1: 1c6e62a6bd2b7a72ff571c972635a9035a747cfe58355c68e676dc0f1577f2a2
+
+k3s_binary_checksum: "{{ k3s_checksums[k3s_version] }}"
+
+# https://github.com/k3s-io/k3s/releases/download/v1.20.4%2Bk3s1/k3s
+k3s_download_url: https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s

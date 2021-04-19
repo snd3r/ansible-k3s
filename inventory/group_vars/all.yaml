@@ -1,0 +1,7 @@
+cluster_name: "hv.cluster"
+
+# proxy
+proxy_proto: "http"
+proxy_address: "proxy.local:3128"
+
+k3s_version: v1.20.5+k3s1

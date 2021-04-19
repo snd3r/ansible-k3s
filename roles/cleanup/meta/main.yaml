@@ -1,0 +1,5 @@
+galaxy_info: 
+  role_name: cleanup
+  author: Anatoly Demidko
+  company: GS Labs
+  min_ansible_version: 2.8

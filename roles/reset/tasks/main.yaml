@@ -1,0 +1,35 @@
+- name: Stop service k3s.service
+  systemd:
+    name: k3s.service
+    state: stopped
+
+- name: Disable service k3s
+  systemd:
+    name: k3s.service
+    enabled: no
+    masked: yes
+
+- name: Remove k3s.service
+  file:
+    state: absent
+    path: /lib/systemd/system/k3s.service
+
+- name: Remove k3s.service
+  file:
+    state: absent
+    path: /lib/systemd/system/k3s.service.env
+
+- name: Remove k3s
+  file:
+    state: absent
+    path: /usr/local/bin/k3s
+
+- name: Remove /var/lib/rancher/
+  file:
+    state: absent
+    path: /var/lib/rancher/
+
+- name: Remove /etc/rancher/
+  file:
+    state: absent
+    path: /etc/rancher/

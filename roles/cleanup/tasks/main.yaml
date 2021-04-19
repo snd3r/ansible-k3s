@@ -1,0 +1,4 @@
+- name: Clean artifact path
+  file:
+    state: absent
+    path: /tmp/ansible_k3s/

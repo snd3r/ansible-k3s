@@ -1,0 +1,37 @@
+- name: Update k3s file
+  copy:
+    src: /tmp/ansible_k3s/k3s
+    dest: /usr/local/bin/
+    mode: a+x
+    remote_src: yes
+
+- name: Restart first master
+  systemd:
+    name: k3s.service
+    state: restarted
+  when: inventory_hostname == groups['master'][0]
+
+- name: Restart other k3s masters
+  command: systemctl restart k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname in groups['master'] and inventory_hostname != groups['master'][0]
+
+- name: Restart k3s agents
+  command: systemctl restart k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname in groups['worker'] and inventory_hostname not in groups['master']
+
+- name: Wait cluster
+  shell: |
+    {% raw %}k3s kubectl get nodes -o go-template='{{range .items }}{{printf "%s\n" .metadata.name}}{{ end }}'{% endraw %}
+  register: nodes
+  retries: 5
+  delay: 10
+  until: nodes.stdout_lines | count == groups['cluster'] | count
+  when: inventory_hostname == groups['master'][0]

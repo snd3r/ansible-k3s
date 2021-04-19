@@ -1,0 +1,5 @@
+- hosts: cluster
+  roles:
+    - role: roles/download
+    - role: roles/grade
+    - role: roles/cleanup

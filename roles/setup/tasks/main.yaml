@@ -1,0 +1,199 @@
+- name: Inventory name to hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Add Ansible inventory mappings to /etc/hosts
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for host in groups['cluster'] %}
+      {{ hostvars[host].ansible_host }} {{ host }}
+      {% endfor %}
+
+- name: Check is ufw installed
+  shell: command -v ufw >/dev/null 2>&1
+  register: is_ufw_exist
+  ignore_errors: yes
+
+- name: Disabling ufw
+  command: ufw disable
+  become: yes
+  when: is_ufw_exist.rc == 0
+
+- name: Disable Swap
+  command: swapoff -a
+
+- name: Ensure swap file doesn't exist
+  file:
+    path: '/swapfile'
+    state: absent
+
+- name: Set systemctl parameters
+  copy:
+    dest: /etc/sysctl.d/60-k3s.conf
+    content: |
+      net.ipv4.ip_forward=1
+      kernel.panic_on_oops=1
+      kernel.panic=10
+      vm.overcommit_memory=1
+      vm.panic_on_oom=0
+
+- name: Set aliases
+  copy:
+    dest: /etc/profile.d/k3s.sh
+    content: |
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+      alias "kubectl=k3s kubectl"
+      alias "crictl=k3s crictl"
+
+- name: Copy k3s file
+  copy:
+    src: /tmp/ansible_k3s/k3s
+    dest: /usr/local/bin/
+    mode: a+x
+    remote_src: yes
+
+- name: Add systemd k3s-server.service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname == groups['master'][0]
+  vars:
+    cmd: "server --cluster-init --disable traefik"
+
+- name: Add systemd k3s-server.service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname in groups['master'] and inventory_hostname != groups['master'][0]
+  vars:
+    cmd: "server  --disable traefik"
+
+- name: Set k3s proxy
+  template:
+    src: 'k3s.service.env.j2'
+    dest: /lib/systemd/system/k3s.service.env
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+
+- name: Create /etc/rancher/k3s directory
+  file:
+    path: /etc/rancher/k3s/
+    state: directory
+    mode: '0644'
+
+- name: Generate a token for adding nodes
+  shell: date +%s | sha256sum | head -c 32 ; echo
+  delegate_to: "{{ groups['master'][0] }}"
+  args:
+    executable: /bin/bash
+  register: k3s_token
+
+- name: Add first master k3s config
+  copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: |
+      token: {{ k3s_token.stdout }}
+      tls-san:
+        - "{{ cluster_name }}"
+    mode: '0644'
+  when: inventory_hostname == groups['master'][0]
+
+- name: Enable first master systemd k3s.service
+  systemd:
+    name: k3s.service
+    daemon_reload: yes
+    enabled: yes
+    masked: no
+    state: restarted
+  when: inventory_hostname == groups['master'][0]
+
+- name: Add other masters k3s config
+  copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: |
+      server: https://{{ hostvars[groups['master'][0]]['ansible_host'] }}:6443
+      token: "{{ k3s_token.stdout }}"
+      tls-san:
+        - "{{ cluster_name }}"
+    mode: '0644'
+  when: inventory_hostname in groups['master'] and inventory_hostname != groups['master'][0]
+
+- name: Add k3s agent service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname in groups['worker'] and inventory_hostname not in groups['master']
+  vars:
+    cmd: agent
+
+- name: Add k3s agent config
+  copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: |
+      server: https://{{ hostvars[groups['master'][0]]['ansible_host'] }}:6443
+      token: "{{ k3s_token.stdout }}"
+    mode: '0644'
+  when: inventory_hostname in groups['worker'] and inventory_hostname not in groups['master']
+
+- name: Unmask k3s services
+  systemd:
+    name: k3s.service
+    daemon_reload: yes
+    masked: no
+
+- name: Start k3s masters
+  command: systemctl start k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname in groups['master'] and inventory_hostname != groups['master'][0]
+
+- name: Start k3s agents
+  command: systemctl start k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname in groups['worker'] and inventory_hostname not in groups['master']
+
+- name: Setup aliases
+  copy:
+    dest: /etc/profile.d/k3s.sh
+    content: |
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+      alias "kubectl=k3s kubectl"
+      alias "crictl=k3s crictl"
+    mode: '0644'
+
+- name: Wait cluster
+  shell: |
+    {% raw %}k3s kubectl get nodes -o go-template='{{range .items }}{{printf "%s\n" .metadata.name}}{{ end }}'{% endraw %}
+  register: nodes
+  retries: 5
+  delay: 10
+  until: nodes.stdout_lines | count == groups['cluster'] | count
+  when: inventory_hostname == groups['master'][0]
+
+- name: Enable scheduling
+  shell: |
+    k3s kubectl taint nodes --all node-role.kubernetes.io/master:NoSchedule-
+  ignore_errors: yes
+  when: inventory_hostname in groups['worker']
+
+
+- name: Set master node taint
+  shell: |
+    k3s kubectl taint nodes {{ inventory_hostname }} node-role.kubernetes.io/master:NoSchedule
+  when: inventory_hostname in groups['master'] and inventory_hostname not in groups['worker']
