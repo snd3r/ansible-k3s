@@ -40,7 +40,7 @@ Ansible 2.8
 Deploy cluster:
 
 ```sh
-ansible-playbook -u root --key-file=~/.ssh/id_rsa -i inventory/hosts.ini cluster.yaml
+ansible-playbook -u root --key-file=~/.ssh/id_rsa -i inventory/hosts.ini deploy.yaml
 ```
 
 Reset cluster:
